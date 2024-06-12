@@ -1,0 +1,7 @@
+# ninja log v6
+8	99	7398944005991376	CMakeFiles/mniam_player.dir/amcom.c.obj	dd267a7adefda636
+7	671	7398974602732666	CMakeFiles/mniam_player.dir/main.c.obj	6f5fdd52516811ac
+672	760	7398974609378302	mniam_player.exe	7e139e4ff6dc3fd9
+22	102	7398984527982287	CMakeFiles/mniam_player.dir/amcom.c.obj	970e27df90bf08f8
+18	625	7398984527932404	CMakeFiles/mniam_player.dir/main.c.obj	df158f9d6c90404f
+625	706	7398984534011573	mniam_player.exe	7e139e4ff6dc3fd9

@@ -1,0 +1,3 @@
+C:/Users/Kuba/Desktop/AMK_projekt/cmake-build-debug/CMakeFiles/mniam_player.dir
+C:/Users/Kuba/Desktop/AMK_projekt/cmake-build-debug/CMakeFiles/edit_cache.dir
+C:/Users/Kuba/Desktop/AMK_projekt/cmake-build-debug/CMakeFiles/rebuild_cache.dir
