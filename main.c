@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdbool.h>
 
 #include "amcom.h"
 #include "amcom_packets.h"
@@ -32,8 +33,9 @@ struct foodObject {
 AMCOM_NewGameRequestPayload gameInfo;
 AMCOM_PlayerState playersInfo[AMCOM_MAX_PLAYER_UPDATES];
 AMCOM_PlayerState ourPlayer;
-AMCOM_FoodState foodInfo[AMCOM_MAX_FOOD_UPDATES];
-
+AMCOM_FoodState foodInfo[64];
+uint8_t foodCount = 0;
+uint8_t foodPacket =0;
 
 uint8_t playerNumber = 0;
 uint8_t playersCount = 0;
@@ -44,46 +46,98 @@ uint32_t gameTime = 0;
 AMCOM_IdentifyRequestPayload gameVersion;
 
 float Move() {
-    static AMCOM_FoodState *lastClosestFood = NULL;
-    static float closestDistance = 9999.0f;
-    static float lastAngle = 0.0f;
+    //food
+    AMCOM_FoodState *lastClosestFood = NULL;
+    float closestFoodDistance = 9999.0f;
+    //float lastAngle = 0.0f;
     AMCOM_FoodState *closestFood = NULL;
+    //player
+    AMCOM_PlayerState *closestPlayer = NULL;
+    float closestPlayerDistance = 9999.0f;
+    bool allFoodEaten = TRUE;
 
     // Sprawdzamy tylko, czy najbliższe jedzenie zostało zjedzone
     if (lastClosestFood != NULL && lastClosestFood->state == 0) {
         lastClosestFood = NULL;  // Resetujemy, ponieważ najbliższe jedzenie zostało zjedzone
-        closestDistance = 9999.0f;  // Resetujemy najbliższą odległość
+        closestFoodDistance = 9999.0f;  // Resetujemy najbliższą odległość
     }
 
     // Szukamy nowego najbliższego jedzenia
-    for (int i = 0; i < AMCOM_MAX_FOOD_UPDATES; i++) {
+    for (int i = 0; i < 64; i++) {
         if (foodInfo[i].state != 0) {
             float dx = ourPlayer.x - foodInfo[i].x;
             float dy = ourPlayer.y - foodInfo[i].y;
             float distance = sqrtf(dx * dx + dy * dy);
-            if (closestFood == NULL || distance < closestDistance) {
-                closestDistance = distance;
+            if (closestFood == NULL || distance < closestFoodDistance) {
+                closestFoodDistance = distance;
                 closestFood = &foodInfo[i];
+                allFoodEaten = false;
             }
         }
     }
 
-    if (closestFood != NULL) {
-        lastClosestFood = closestFood;
-        float dx = closestFood->x - ourPlayer.x;
-        float dy = closestFood->y - ourPlayer.y;
-        float angle = atan2f(dy, dx);  // Używamy dy, dx, aby uzyskać prawidłowy kąt
-
-        printf("Closest Food: FoodNo: %hhu, State: %hhu, x: %f, y: %f\n", closestFood->foodNo, closestFood->state, closestFood->x, closestFood->y);
-        printf("Angle to Food: %f radians\n", angle);
-
-        lastAngle = angle;
-        return angle;
-    } else {
-        printf("No available food found\n");
+    // Szukamy najbliższego gracza z mniejszym HP
+    for (int i = 0; i < AMCOM_MAX_PLAYER_UPDATES; i++) {
+        if (playersInfo[i].hp > 0) {
+            float dx = ourPlayer.x - playersInfo[i].x;
+            float dy = ourPlayer.y - playersInfo[i].y;
+            float distance = sqrtf(dx * dx + dy * dy);
+            if (closestPlayer == NULL || distance < closestPlayerDistance) {
+                if (ourPlayer.hp > playersInfo[i].hp) {
+                    closestPlayer = &playersInfo[i];
+                    closestPlayerDistance = distance;
+                }
+            }
+        }
     }
 
-    return lastAngle;
+    // Decyzja o kierunku ruchu
+    if (!allFoodEaten) {
+        if (closestFood != NULL) {
+            //lastClosestFood = closestFood;
+            float dx = closestFood->x - ourPlayer.x;
+            float dy = closestFood->y - ourPlayer.y;
+            float angle = atan2f(dy, dx);  // Używamy dy, dx, aby uzyskać prawidłowy kąt
+
+            printf("Closest Food: FoodNo: %hhu, State: %hhu, x: %f, y: %f\n", closestFood->foodNo, closestFood->state, closestFood->x, closestFood->y);
+            printf("Angle to Food: %f radians\n", angle);
+
+            //lastAngle = angle;
+            return angle;
+        }
+    } else {
+        printf("No available food found, looking for player with lower hp\n");
+        if (closestPlayer != NULL) {
+            float dx = closestPlayer->x - ourPlayer.x;
+            float dy = closestPlayer->y - ourPlayer.y;
+            float angle = atan2f(dy, dx);
+            //lastAngle = angle;
+            return angle;
+        } else {
+            printf("No players with lower HP found, avoiding stronger players\n");
+            for (int i = 0; i < AMCOM_MAX_PLAYER_UPDATES; i++) {
+                if (playersInfo[i].hp > ourPlayer.hp) {
+                    float dx = ourPlayer.x - playersInfo[i].x;
+                    float dy = ourPlayer.y - playersInfo[i].y;
+                    float distance = sqrtf(dx * dx + dy * dy);
+                    if (closestPlayer == NULL || distance < closestPlayerDistance) {
+                        closestPlayer = &playersInfo[i];
+                        closestPlayerDistance = distance;
+                    }
+                }
+            }
+
+            if (closestPlayer != NULL) {
+                float dx = ourPlayer.x - closestPlayer->x;
+                float dy = ourPlayer.y - closestPlayer->y;
+                float angle = atan2f(dy, dx);  // Odwracamy kierunek, aby uciekać
+                //lastAngle = angle;
+                return angle;
+            }
+        }
+    }
+
+    return 0.0f;
 }
 void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
     uint8_t buf[AMCOM_MAX_PACKET_SIZE];
@@ -109,6 +163,9 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
                 foodInfo[i].x = 0.0f;
                 foodInfo[i].y = 0.0f;
             }
+            foodPacket = 0;
+           //memset(foodInfo,0,sizeof(foodInfo)); // cleaning the foodInfo structure
+            foodCount=0;
             AMCOM_NewGameResponsePayload newGameResponse;
             sprintf(newGameResponse.helloMessage, "Tylko zwyciestwo");
             toSend= AMCOM_Serialize(AMCOM_NEW_GAME_RESPONSE, &newGameResponse,sizeof(newGameResponse), buf);
@@ -132,8 +189,8 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
             if(playerState.playerNo == gameInfo.playerNumber) {
                 ourPlayer=playerState;
             }
-            // printf("Player Number: %hhu, Player hp: %hu, xPos: %f, yPos: %f\n",
-            //   playersInfo[i].playerNo, playersInfo[i].hp, playersInfo[i].x, playersInfo[i].y);
+            printf("Player Number: %hhu, Player hp: %hu, xPos: %f, yPos: %f\n",
+              playersInfo[i].playerNo, playersInfo[i].hp, playersInfo[i].x, playersInfo[i].y);
         }
         printf("Our Player Number: %hhu, Player hp: %hu, xPos: %f, yPos: %f\n",
        ourPlayer.playerNo, ourPlayer.hp, ourPlayer.x, ourPlayer.y);
@@ -142,9 +199,9 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
         printf("Got food info, no response, packet length: %d\n", packet->header.length);
 
         uint8_t numRecords = packet->header.length / 11;
-        if (numRecords > AMCOM_MAX_FOOD_UPDATES) {
-            numRecords = AMCOM_MAX_FOOD_UPDATES;
-        }
+        // if (numRecords > AMCOM_MAX_FOOD_UPDATES) {
+        //     numRecords = AMCOM_MAX_FOOD_UPDATES;
+        // }
 
     for (uint8_t i = 0; i < numRecords; i++) {
         int offset = i * 11;
@@ -153,7 +210,9 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
         float x, y;
         memcpy(&x, &packet->payload[offset + 3], sizeof(float));
         memcpy(&y, &packet->payload[offset + 7], sizeof(float));
+
         //searching for food with certain food number
+
         int foodIndex = -1;
         for (int j = 0; j < AMCOM_MAX_FOOD_UPDATES; j++) {
             if (foodInfo[j].foodNo == foodNo) {
@@ -170,6 +229,7 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
                     foodInfo[j].state = state;
                     foodInfo[j].x = x;
                     foodInfo[j].y = y;
+                    foodCount++;
                     printf("Added new food: Food Number: %hu, State: %hhu, xPos: %f, yPos: %f\n",
                         foodInfo[j].foodNo, foodInfo[j].state, foodInfo[j].x, foodInfo[j].y);
                     break;
@@ -184,6 +244,7 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
                 foodInfo[foodIndex].foodNo, foodInfo[foodIndex].state, foodInfo[foodIndex].x, foodInfo[foodIndex].y);
         }
     }
+        foodPacket++;
     break;
         case AMCOM_MOVE_REQUEST:
             printf("Got MOVE.request. Responding with MOVE.Response\n");
