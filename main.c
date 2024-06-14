@@ -11,6 +11,9 @@
 
 #include "amcom.h"
 #include "amcom_packets.h"
+enum {
+    MAX_FOOD_QUANTITY = 64
+};
 struct playerInfo {
     uint8_t playerNumber;
     uint16_t health;
@@ -30,45 +33,33 @@ struct foodObject {
     float yPos;
     struct foodObject* next;
 };
-AMCOM_NewGameRequestPayload gameInfo;
-AMCOM_PlayerState playersInfo[AMCOM_MAX_PLAYER_UPDATES];
-AMCOM_PlayerState ourPlayer;
-AMCOM_FoodState foodInfo[64];
-uint8_t foodCount = 0;
+static AMCOM_NewGameRequestPayload gameInfo;
+static AMCOM_PlayerState playersInfo[AMCOM_MAX_PLAYER_UPDATES];
+static AMCOM_PlayerState ourPlayer;
+static AMCOM_FoodState foodInfo[MAX_FOOD_QUANTITY];
+static int foodCount = 0;
 uint8_t foodPacket =0;
-
-uint8_t playerNumber = 0;
-uint8_t playersCount = 0;
-float width =0;
-float height = 0;
 uint32_t gameTime = 0;
 
-AMCOM_IdentifyRequestPayload gameVersion;
+static AMCOM_IdentifyRequestPayload gameVersion;
 
 float Move() {
     //food
     AMCOM_FoodState *lastClosestFood = NULL;
     float closestFoodDistance = 9999.0f;
-    //float lastAngle = 0.0f;
     AMCOM_FoodState *closestFood = NULL;
     //player
     AMCOM_PlayerState *closestPlayer = NULL;
     float closestPlayerDistance = 9999.0f;
     bool allFoodEaten = TRUE;
 
-    // Sprawdzamy tylko, czy najbliższe jedzenie zostało zjedzone
-    if (lastClosestFood != NULL && lastClosestFood->state == 0) {
-        lastClosestFood = NULL;  // Resetujemy, ponieważ najbliższe jedzenie zostało zjedzone
-        closestFoodDistance = 9999.0f;  // Resetujemy najbliższą odległość
-    }
-
     // Szukamy nowego najbliższego jedzenia
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_FOOD_QUANTITY; i++) {
         if (foodInfo[i].state != 0) {
             float dx = ourPlayer.x - foodInfo[i].x;
             float dy = ourPlayer.y - foodInfo[i].y;
             float distance = sqrtf(dx * dx + dy * dy);
-            if (closestFood == NULL || distance < closestFoodDistance) {
+            if (distance < closestFoodDistance) {
                 closestFoodDistance = distance;
                 closestFood = &foodInfo[i];
                 allFoodEaten = false;
@@ -82,7 +73,7 @@ float Move() {
             float dx = ourPlayer.x - playersInfo[i].x;
             float dy = ourPlayer.y - playersInfo[i].y;
             float distance = sqrtf(dx * dx + dy * dy);
-            if (closestPlayer == NULL || distance < closestPlayerDistance) {
+            if (distance < closestPlayerDistance) {
                 if (ourPlayer.hp > playersInfo[i].hp) {
                     closestPlayer = &playersInfo[i];
                     closestPlayerDistance = distance;
@@ -92,8 +83,7 @@ float Move() {
     }
 
     // Decyzja o kierunku ruchu
-    if (!allFoodEaten) {
-        if (closestFood != NULL) {
+    if (!allFoodEaten&& closestFood!=NULL) {
             //lastClosestFood = closestFood;
             float dx = closestFood->x - ourPlayer.x;
             float dy = closestFood->y - ourPlayer.y;
@@ -104,7 +94,6 @@ float Move() {
 
             //lastAngle = angle;
             return angle;
-        }
     } else {
         printf("No available food found, looking for player with lower hp\n");
         if (closestPlayer != NULL) {
@@ -115,12 +104,14 @@ float Move() {
             return angle;
         } else {
             printf("No players with lower HP found, avoiding stronger players\n");
+            closestPlayer=NULL;
+            closestPlayerDistance = 9999.0f;//?
             for (int i = 0; i < AMCOM_MAX_PLAYER_UPDATES; i++) {
                 if (playersInfo[i].hp > ourPlayer.hp) {
                     float dx = ourPlayer.x - playersInfo[i].x;
                     float dy = ourPlayer.y - playersInfo[i].y;
                     float distance = sqrtf(dx * dx + dy * dy);
-                    if (closestPlayer == NULL || distance < closestPlayerDistance) {
+                    if (distance < closestPlayerDistance) {
                         closestPlayer = &playersInfo[i];
                         closestPlayerDistance = distance;
                     }
@@ -131,7 +122,10 @@ float Move() {
                 float dx = ourPlayer.x - closestPlayer->x;
                 float dy = ourPlayer.y - closestPlayer->y;
                 float angle = atan2f(dy, dx);  // Odwracamy kierunek, aby uciekać
-                //lastAngle = angle;
+
+                printf("Closest Stronger Player: PlayerNo: %hhu, HP: %hu, x: %f, y: %f\n", closestPlayer->playerNo, closestPlayer->hp, closestPlayer->x, closestPlayer->y);
+                printf("Angle to Avoid Player: %f radians\n", angle);
+
                 return angle;
             }
         }
@@ -158,10 +152,7 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
             printf("Got NEW_GAME.request. Responding with NEW_GAME.response\n");
             memcpy(&gameInfo, packet->payload, sizeof(gameInfo));
             for (int i = 0; i < AMCOM_MAX_FOOD_UPDATES; ++i) {
-                foodInfo[i].foodNo = 0;
                 foodInfo[i].state = 0;
-                foodInfo[i].x = 0.0f;
-                foodInfo[i].y = 0.0f;
             }
             foodPacket = 0;
            //memset(foodInfo,0,sizeof(foodInfo)); // cleaning the foodInfo structure
@@ -175,17 +166,14 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
         case AMCOM_PLAYER_UPDATE_REQUEST:
             printf("Got PLAYER_UPDATE.request.\n");
         uint8_t numPlayers = packet->header.length/11;
-        if(numPlayers>AMCOM_MAX_PLAYER_UPDATES) {
-            numPlayers = AMCOM_MAX_FOOD_UPDATES;
-        }
         for(uint8_t i=0; i < numPlayers; i++) {
             int offset = 11*i;
             AMCOM_PlayerState playerState;
-            playerState.playerNo=packet->payload[offset+0];
-            playerState.hp = (uint16_t)(packet->payload[offset+1]|packet->payload[offset+2]<<8);
+            playerState.playerNo=packet->payload[offset];
+            playerState.hp = (uint16_t)(packet->payload[offset+1]|(packet->payload[offset+2]<<8));
             memcpy(&playerState.x,&packet->payload[offset+3],sizeof(float));
             memcpy(&playerState.y,&packet->payload[offset+7],sizeof(float));
-            playersInfo[i]=playerState;
+            playersInfo[playerState.playerNo]=playerState; //tu byla zmiana
             if(playerState.playerNo == gameInfo.playerNumber) {
                 ourPlayer=playerState;
             }
@@ -199,53 +187,52 @@ void amPacketHandler(const AMCOM_Packet* packet, void* userContext) {
         printf("Got food info, no response, packet length: %d\n", packet->header.length);
 
         uint8_t numRecords = packet->header.length / 11;
-        // if (numRecords > AMCOM_MAX_FOOD_UPDATES) {
-        //     numRecords = AMCOM_MAX_FOOD_UPDATES;
-        // }
+        for (uint8_t i = 0; i < numRecords; i++) {
+            int offset = i * 11;
+            uint16_t foodNo = (uint16_t)(packet->payload[offset] | (packet->payload[offset + 1] << 8));
+            uint8_t state = packet->payload[offset + 2];
+            float x, y;
+            memcpy(&x, &packet->payload[offset + 3], sizeof(x));
+            memcpy(&y, &packet->payload[offset + 7], sizeof(y));
 
-    for (uint8_t i = 0; i < numRecords; i++) {
-        int offset = i * 11;
-        uint16_t foodNo = (uint16_t)(packet->payload[offset] | (packet->payload[offset + 1] << 8));
-        uint8_t state = packet->payload[offset + 2];
-        float x, y;
-        memcpy(&x, &packet->payload[offset + 3], sizeof(float));
-        memcpy(&y, &packet->payload[offset + 7], sizeof(float));
+            //searching for food with certain food number
 
-        //searching for food with certain food number
-
-        int foodIndex = -1;
-        for (int j = 0; j < AMCOM_MAX_FOOD_UPDATES; j++) {
-            if (foodInfo[j].foodNo == foodNo) {
-                foodIndex = j;
-                break;
-            }
-        }
-
-        // if there are not any, create one
-        if (foodIndex == -1) {
-            for (int j = 0; j < AMCOM_MAX_FOOD_UPDATES; j++) {
-                if (foodInfo[j].state == 0) { // Szukamy pustego slotu w tablicy foodInfo
-                    foodInfo[j].foodNo = foodNo;
-                    foodInfo[j].state = state;
-                    foodInfo[j].x = x;
-                    foodInfo[j].y = y;
-                    foodCount++;
-                    printf("Added new food: Food Number: %hu, State: %hhu, xPos: %f, yPos: %f\n",
-                        foodInfo[j].foodNo, foodInfo[j].state, foodInfo[j].x, foodInfo[j].y);
+            int foodIndex = -1;
+            int emptySlotIndex = -1;
+            for (int j = 0; j < MAX_FOOD_QUANTITY; j++) {
+                if (foodInfo[j].foodNo == foodNo) {
+                    foodIndex = j;
                     break;
                 }
+                if (emptySlotIndex == -1 && foodInfo[j].state == 0) {
+                    emptySlotIndex = j;
+                }
             }
-        } else {
-            // if there are this object, update his info
-            foodInfo[foodIndex].state = state;
-            foodInfo[foodIndex].x = x;
-            foodInfo[foodIndex].y = y;
-            printf("Updated food: Food Number: %hu, State: %hhu, xPos: %f, yPos: %f\n",
-                foodInfo[foodIndex].foodNo, foodInfo[foodIndex].state, foodInfo[foodIndex].x, foodInfo[foodIndex].y);
+
+            if (foodIndex != -1) {
+                // Update the existing food item
+                foodInfo[foodIndex].state = state;
+                foodInfo[foodIndex].x = x;
+                foodInfo[foodIndex].y = y;
+                printf("Updated food: Food Number: %hu, State: %hhu, xPos: %f, yPos: %f\n",
+                       foodInfo[foodIndex].foodNo, foodInfo[foodIndex].state, foodInfo[foodIndex].x, foodInfo[foodIndex].y);
+            } else if (emptySlotIndex != -1 && state == 1) {
+                // Add a new food item in an empty slot
+                foodInfo[emptySlotIndex].foodNo = foodNo;
+                foodInfo[emptySlotIndex].state = state;
+                foodInfo[emptySlotIndex].x = x;
+                foodInfo[emptySlotIndex].y = y;
+                printf("Added new food: Food Number: %hu, State: %hhu, xPos: %f, yPos: %f\n",
+                       foodInfo[emptySlotIndex].foodNo, foodInfo[emptySlotIndex].state, foodInfo[emptySlotIndex].x, foodInfo[emptySlotIndex].y);
+            } else {
+                // Log if there's no space to add new food
+                if (state == 1) {
+                    printf("Error: No empty slot to add new food: Food Number: %hu, State: %hhu, xPos: %f, yPos: %f\n",
+                           foodNo, state, x, y);
+                }
+            }
         }
-    }
-        foodPacket++;
-    break;
+        break;
         case AMCOM_MOVE_REQUEST:
             printf("Got MOVE.request. Responding with MOVE.Response\n");
             AMCOM_MoveRequestPayload moveRequest;
