@@ -88,3 +88,6 @@
 782	881	7401009294459898	mniam_player.exe	7e139e4ff6dc3fd9
 31	822	7401016844741869	CMakeFiles/mniam_player.dir/main.c.obj	df158f9d6c90404f
 823	953	7401016852659671	mniam_player.exe	7e139e4ff6dc3fd9
+80	734	7403570116714802	CMakeFiles/mniam_player.dir/amcom.c.obj	970e27df90bf08f8
+70	2628	7403570116609192	CMakeFiles/mniam_player.dir/main.c.obj	df158f9d6c90404f
+2628	2974	7403570142183229	mniam_player.exe	7e139e4ff6dc3fd9

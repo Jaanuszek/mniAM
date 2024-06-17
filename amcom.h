@@ -28,19 +28,8 @@ extern "C" {
 #include <stddef.h>
 #include <assert.h>
 
-#if defined __ARMCC_VERSION
-// Definitions for KEIL:
-
-/// Indicates that the structure shall be packed
-#define AMPACKED							__packed
-
-#elif defined __GNUC__
-// Definitions for GCC:
-
 /// Indicates that the structure shall be packed
 #define AMPACKED 							__attribute__((packed))
-
-#endif
 
 
 /** Structure defining the packet header */
